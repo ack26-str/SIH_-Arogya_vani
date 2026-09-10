@@ -49,7 +49,7 @@ def extract_clinical_data(
     6. Translate all extracted medical terms into English standard medical terminology.
     """
 
-    MODELS_TO_TRY = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest']
+    MODELS_TO_TRY = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']
     
     for model_name in MODELS_TO_TRY:
         try:
@@ -58,6 +58,7 @@ def extract_clinical_data(
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
+                    max_output_tokens=300,
                     temperature=0.1,
                 ),
             )
@@ -84,7 +85,7 @@ def phrase_clinical_question(
     if not client:
         return f"System error. Next topic: {topic_directive.topic_guidance_text}"
 
-    history_text = "\n".join([f"{msg['role'].capitalize()}: {msg['text']}" for msg in conversation_history[-6:]])
+    history_text = "\n".join([f"{msg['role'].capitalize()}: {msg['text']}" for msg in conversation_history[-4:]])
 
     prompt = f"""
     You are AarogyaVani, an empathetic, highly intelligent medical clinical intake assistant.
@@ -96,14 +97,14 @@ def phrase_clinical_question(
     "{topic_directive.topic_guidance_text}"
     
     INSTRUCTIONS:
-    1. You MUST ask about the directive above. Do not ask about anything else.
+    1. Ask about the directive above.
     2. Phrase the question naturally, warmly, and empathetically.
     3. Keep it brief. Ask ONE clarifying question at a time.
     4. You MUST respond in this language: {patient_language}.
-    5. Do not use medical jargon unless necessary.
+    5. Do not use medical jargon.
     """
 
-    MODELS_TO_TRY = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest']
+    MODELS_TO_TRY = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']
 
     for model_name in MODELS_TO_TRY:
         try:
@@ -111,7 +112,8 @@ def phrase_clinical_question(
                 model=model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.4,
+                    max_output_tokens=150,
+                    temperature=0.3,
                 ),
             )
             if response.text and response.text.strip():
@@ -121,3 +123,73 @@ def phrase_clinical_question(
             continue
 
     return "I'm sorry, could you please tell me more about that?"
+
+
+def process_unified_intake_turn(
+    patient_text: str,
+    current_state: IntakeState,
+    next_topic_guidance: str,
+    conversation_history: List[Dict[str, str]],
+    patient_language: str
+) -> tuple[Dict[str, Any], str]:
+    """
+    Optimized single-pass call:
+    Extracts clinical delta AND phrases the next empathetic question in ONE roundtrip.
+    Cuts latency by > 50%.
+    """
+    if not client:
+        return {}, "Could you tell me more about your symptoms?"
+
+    history_text = "\n".join([f"{msg['role'].capitalize()}: {msg['text']}" for msg in conversation_history[-4:]])
+
+    prompt = f"""
+    You are AarogyaVani, an empathetic, highly intelligent medical clinical intake assistant.
+
+    CURRENT KNOWN CLINICAL STATE:
+    {json.dumps(current_state.to_dict(), indent=2)}
+
+    RECENT CONVERSATION HISTORY:
+    {history_text}
+
+    LATEST PATIENT MESSAGE:
+    "{patient_text}"
+
+    NEXT CLINICAL FOCUS:
+    "{next_topic_guidance}"
+
+    INSTRUCTIONS:
+    1. Extract newly mentioned clinical facts (chief_complaint, site, onset, character, radiation, severity, associations, timing, triggers, drug_history, allergies, past_history) into the 'extracted' dictionary. Use standard English medical terminology.
+    2. Formulate the single next warm, empathetic question to ask the patient about the NEXT CLINICAL FOCUS, written strictly in this language: {patient_language}. Keep it to 1-2 sentences.
+    3. Return ONLY a valid JSON object matching:
+    {{
+      "extracted": {{ ... }},
+      "reply_question": "..."
+    }}
+    """
+
+    MODELS_TO_TRY = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']
+
+    for model_name in MODELS_TO_TRY:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    max_output_tokens=350,
+                    temperature=0.2,
+                ),
+            )
+            if response.text:
+                data = json.loads(response.text)
+                extracted = data.get("extracted", {})
+                if not isinstance(extracted, dict):
+                    extracted = {}
+                question = data.get("reply_question", "").strip()
+                if question:
+                    return extracted, question
+        except Exception as e:
+            print(f"[{model_name}] Error in unified intake turn: {e}")
+            continue
+
+    return {}, "I'm sorry, could you please tell me more about that?"

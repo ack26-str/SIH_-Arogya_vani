@@ -3,6 +3,8 @@ from fastapi.concurrency import run_in_threadpool
 import uuid
 from datetime import datetime
 import json
+import time
+import asyncio
 
 from app.core.database import DatabaseService
 from app.models.schemas import (
@@ -13,7 +15,7 @@ from app.models.schemas import (
     DepartmentConfig
 )
 from app.services.intake_state_machine import IntakeState, IntakeStateMachine
-from app.services.llm_service import extract_clinical_data, phrase_clinical_question
+from app.services.llm_service import extract_clinical_data, phrase_clinical_question, process_unified_intake_turn
 from app.services.bhashini_service import BhashiniService
 
 router = APIRouter(
@@ -115,15 +117,18 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     #   2. fallback_text from Flutter's device speech_to_text (offline)
     #   3. request.text (typed text)
     user_text = (request.text or getattr(request, 'fallback_text', '') or '').strip()
-    if request.is_voice and request.audio_base64:
-        bhashini_transcript = await BhashiniService.transcribe_audio(request.audio_base64, request.language)
-        if bhashini_transcript:
-            user_text = bhashini_transcript.strip()  # Bhashini succeeded
-        elif getattr(request, 'fallback_text', None) and request.fallback_text.strip():
-            user_text = request.fallback_text.strip()  # Offline device STT
-            print(f"[ASR Fallback] Using device speech_to_text: '{user_text}'")
-        elif request.text and request.text.strip():
-            user_text = request.text.strip()
+    if request.is_voice and request.audio_base64 and not user_text:
+        try:
+            bhashini_transcript = await asyncio.wait_for(
+                BhashiniService.transcribe_audio(request.audio_base64, request.language),
+                timeout=2.0
+            )
+            if bhashini_transcript:
+                user_text = bhashini_transcript.strip()
+        except Exception:
+            pass
+    elif getattr(request, 'fallback_text', None) and request.fallback_text.strip() and not user_text:
+        user_text = request.fallback_text.strip()
 
     if not user_text.strip():
         # Don't 400 — return a soft prompt so Flutter shows a normal AI bubble
@@ -155,33 +160,34 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         (conversation_id,)
     )
     
-    # 5. Extract Data (LLM)
-    delta = await run_in_threadpool(
-        extract_clinical_data,
+    # 5. Determine Next Topic & Process Turn (Single-Pass Optimized LLM)
+    next_topic = IntakeStateMachine.get_next_topic(state)
+    
+    t_llm_start = time.time()
+    delta, reply_text = await run_in_threadpool(
+        process_unified_intake_turn,
         patient_text=user_text,
         current_state=state,
-        conversation_history=messages
+        next_topic_guidance=next_topic.topic_guidance_text,
+        conversation_history=messages,
+        patient_language=request.language
     )
+    t_llm_end = time.time()
+    print(f"[TIMING] Single-pass unified intake turn took: {t_llm_end - t_llm_start:.2f}s")
     
     # 6. Apply delta to state (merge logic)
     for key, value in delta.items():
         if hasattr(state, key) and value:
-            # Simple merge: lists are extended, simple types are replaced if they were empty
             curr_val = getattr(state, key)
             if isinstance(curr_val, list) and isinstance(value, list):
-                # We need to handle nested dicts for Medication/Allergy
                 if key in ["drug_history", "allergy_history"]:
-                    # Delta might be a list of dicts, we need to merge it carefully, but 
-                    # from_dict handles instantiation. For now just extend raw dicts? 
-                    # Wait, state.drug_history is a list of Pydantic models.
-                    pass # Handled below
+                    pass
                 else:
                     curr_val.extend([v for v in value if v not in curr_val])
             elif not curr_val:
                 setattr(state, key, value)
                 
-    # Re-serialize to clean up typed fields (like drug_history)
-    # The safest way is to convert to dict, update raw dict, and from_dict again.
+    # Re-serialize to clean up typed fields
     raw_state = state.to_dict()
     for key, value in delta.items():
         if key in raw_state and value:
@@ -189,44 +195,30 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
                 if key not in ["drug_history", "allergy_history"]:
                     raw_state[key].extend([v for v in value if v not in raw_state[key]])
                 else:
-                    raw_state[key].extend(value) # Just append dicts
+                    raw_state[key].extend(value)
             elif not raw_state[key]:
                 raw_state[key] = value
     
     # Reconstruct state
     state = IntakeState.from_dict(raw_state)
     
-    # 7. Get Next Topic (Deterministic State Machine)
-    next_topic = IntakeStateMachine.get_next_topic(state)
-    
-    # 8. Phrase Question (LLM)
-    reply_text = ""
+    # Check if complete
     is_complete = state.is_complete
-    
     if is_complete:
-        reply_text = "Thank you. I have collected all the necessary information. The doctor will see you shortly."
-        if request.language != "en":
-             reply_text = await run_in_threadpool(
-                phrase_clinical_question,
-                topic_directive=next_topic,
-                conversation_history=messages,
-                patient_language=request.language
-            )
         await DatabaseService.update("conversations", conversation_id, {"status": "completed"})
-    else:
-        reply_text = await run_in_threadpool(
-            phrase_clinical_question,
-            topic_directive=next_topic,
-            conversation_history=messages,
-            patient_language=request.language
-        )
         
     # Handle Voice Output (TTS)
     audio_url = None
     if request.is_voice:
-        audio_base64 = await BhashiniService.synthesize_speech(reply_text, request.language, gender="female")
-        if audio_base64:
-            audio_url = f"data:audio/wav;base64,{audio_base64}"
+        try:
+            audio_base64 = await asyncio.wait_for(
+                BhashiniService.synthesize_speech(reply_text, request.language, gender="female"),
+                timeout=1.5
+            )
+            if audio_base64:
+                audio_url = f"data:audio/wav;base64,{audio_base64}"
+        except Exception:
+            pass # Flutter immediately uses local device TTS fallback
             
     # 9. Save AI response
     now = datetime.utcnow().isoformat()
