@@ -1,0 +1,80 @@
+{
+  "projectId": "15890722295350380855",
+  "title": "SIH Clinical Intake",
+  "designSystem": {
+    "displayName": "Clinical Teal Calm",
+    "primaryColor": "#0D9488",
+    "backgroundColor": "#F8FAFC",
+    "surfaceColor": "#FFFFFF",
+    "textColor": "#0F172A",
+    "fontFamily": "Plus Jakarta Sans"
+  },
+  "screens": [
+    {
+      "id": "splash",
+      "title": "Splash Screen",
+      "route": "/splash",
+      "deviceType": "MOBILE"
+    },
+    {
+      "id": "welcome",
+      "title": "Welcome Onboarding",
+      "route": "/welcome",
+      "deviceType": "MOBILE"
+    },
+    {
+      "id": "language",
+      "title": "Language Selection",
+      "route": "/language",
+      "deviceType": "MOBILE"
+    },
+    {
+      "id": "profile_setup",
+      "title": "Profile Setup",
+      "route": "/profile-setup",
+      "deviceType": "MOBILE"
+    },
+    {
+      "id": "home_dashboard",
+      "title": "Home Dashboard",
+      "route": "/home",
+      "deviceType": "MOBILE"
+    },
+    {
+      "id": "conversation",
+      "title": "Clinical Assistant Conversation",
+      "route": "/conversation",
+      "deviceType": "MOBILE"
+    },
+    {
+      "id": "medical_records",
+      "title": "Medical Records Management",
+      "route": "/records",
+      "deviceType": "MOBILE"
+    },
+    {
+      "id": "record_processing",
+      "title": "Document Processing Progress",
+      "route": "/record-processing",
+      "deviceType": "MOBILE"
+    },
+    {
+      "id": "record_details",
+      "title": "Extracted Medical Information",
+      "route": "/record-details",
+      "deviceType": "MOBILE"
+    },
+    {
+      "id": "clinical_summary",
+      "title": "Clinical Intake Summary",
+      "route": "/clinical-summary",
+      "deviceType": "MOBILE"
+    },
+    {
+      "id": "profile",
+      "title": "Patient Profile & Settings",
+      "route": "/profile",
+      "deviceType": "MOBILE"
+    }
+  ]
+}
