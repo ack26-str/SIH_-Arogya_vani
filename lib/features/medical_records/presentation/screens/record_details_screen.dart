@@ -12,6 +12,7 @@ import '../../../../models/patient_info.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_card.dart';
 import '../../../../shared/widgets/status_chip.dart';
+import '../../../../services/service_providers.dart';
 import '../controllers/records_controller.dart';
 
 class RecordDetailsScreen extends ConsumerStatefulWidget {
@@ -29,51 +30,70 @@ class _RecordDetailsScreenState extends ConsumerState<RecordDetailsScreen> {
   void initState() {
     super.initState();
     final record = ref.read(activeProcessingRecordProvider);
-    _extraction = record?.extractedInformation ??
-        const MedicalExtraction(
-          patientInformation: PatientInfo(
-            age: '48',
-            gender: 'Male',
+    if (record?.extractedInformation != null) {
+      _extraction = record!.extractedInformation!;
+    } else if (record?.id.startsWith('demo_') == true) {
+      _extraction = const MedicalExtraction(
+        patientInformation: PatientInfo(
+          age: '48',
+          gender: 'Male',
+        ),
+        diagnoses: [
+          'Acute Febrile Illness (Suspected Viral Syndrome)',
+          'Type 2 Diabetes Mellitus',
+        ],
+        medications: [
+          Medication(
+            name: 'Metformin',
+            dose: '500 mg',
+            frequency: 'Twice daily',
           ),
-          diagnoses: [
-            'Acute Febrile Illness (Suspected Viral Syndrome)',
-            'Type 2 Diabetes Mellitus',
-          ],
-          medications: [
-            Medication(
-              name: 'Metformin',
-              dose: '500 mg',
-              frequency: 'Twice daily',
-            ),
-            Medication(
-              name: 'Paracetamol',
-              dose: '650 mg',
-              frequency: 'As needed for fever',
-            ),
-          ],
-          allergies: [
-            Allergy(allergen: 'Penicillin', reaction: 'Skin rash'),
-          ],
-          labResults: [
-            LabResult(
-              testName: 'Platelet Count',
-              resultValue: '195,000',
-              date: 'Aug 28, 2026',
-            ),
-            LabResult(
-              testName: 'HbA1c',
-              resultValue: '6.8',
-              date: 'Aug 28, 2026',
-            ),
-          ],
-          previousTreatments: [
-            'Oral hydration therapy',
-            'Paracetamol SOS',
-          ],
-          medicalHistory: [
-            'Type 2 Diabetes since 2020',
-          ],
-        );
+          Medication(
+            name: 'Paracetamol',
+            dose: '650 mg',
+            frequency: 'As needed for fever',
+          ),
+        ],
+        allergies: [
+          Allergy(allergen: 'Penicillin', reaction: 'Skin rash'),
+        ],
+        labResults: [
+          LabResult(
+            testName: 'Platelet Count',
+            resultValue: '195,000',
+            date: 'Aug 28, 2026',
+          ),
+          LabResult(
+            testName: 'HbA1c',
+            resultValue: '6.8',
+            date: 'Aug 28, 2026',
+          ),
+        ],
+        previousTreatments: [
+          'Oral hydration therapy',
+          'Paracetamol SOS',
+        ],
+        medicalHistory: [
+          'Type 2 Diabetes since 2020',
+        ],
+      );
+    } else {
+      _extraction = const MedicalExtraction();
+      _fetchRealExtraction(record?.id);
+    }
+  }
+
+  Future<void> _fetchRealExtraction(String? recordId) async {
+    if (recordId == null) return;
+    try {
+      final service = ref.read(documentServiceProvider);
+      final ext = await service.getExtractedInformation(recordId);
+      if (mounted && (ext.labResults.isNotEmpty || ext.medications.isNotEmpty || ext.diagnoses.isNotEmpty || ext.patientInformation != null)) {
+        setState(() {
+          _extraction = ext;
+        });
+      }
+    } catch (_) {}
   }
 
   void _showAddMedicationDialog() {
@@ -271,35 +291,46 @@ class _RecordDetailsScreenState extends ConsumerState<RecordDetailsScreen> {
                         onPressed: _showAddDiagnosisDialog,
                       )
                     : null,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _extraction.diagnoses.map((diag) {
-                        return Chip(
-                          label: Text(diag),
-                          labelStyle: AppTypography.labelSmall.copyWith(
-                            color: AppColors.primaryDark,
-                            fontWeight: FontWeight.w600,
+                child: _extraction.diagnoses.isEmpty && !_isEditing
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Text(
+                          'No explicit diagnoses noted in document.',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: AppColors.textSecondary,
+                            fontStyle: FontStyle.italic,
                           ),
-                          backgroundColor: AppColors.primaryContainer.withValues(alpha: 0.6),
-                          deleteIcon: _isEditing ? const Icon(Icons.close, size: 14) : null,
-                          onDeleted: _isEditing
-                              ? () {
-                                  setState(() {
-                                    final list = List<String>.from(_extraction.diagnoses)
-                                      ..remove(diag);
-                                    _extraction = _extraction.copyWith(diagnoses: list);
-                                  });
-                                }
-                              : null,
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                ),
+                        ),
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: _extraction.diagnoses.map((diag) {
+                              return Chip(
+                                label: Text(diag),
+                                labelStyle: AppTypography.labelSmall.copyWith(
+                                  color: AppColors.primaryDark,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                backgroundColor: AppColors.primaryContainer.withValues(alpha: 0.6),
+                                deleteIcon: _isEditing ? const Icon(Icons.close, size: 14) : null,
+                                onDeleted: _isEditing
+                                    ? () {
+                                        setState(() {
+                                          final list = List<String>.from(_extraction.diagnoses)
+                                            ..remove(diag);
+                                          _extraction = _extraction.copyWith(diagnoses: list);
+                                        });
+                                      }
+                                    : null,
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ),
               ),
               const SizedBox(height: 16),
 
@@ -313,55 +344,66 @@ class _RecordDetailsScreenState extends ConsumerState<RecordDetailsScreen> {
                         onPressed: _showAddMedicationDialog,
                       )
                     : null,
-                child: Column(
-                  children: _extraction.medications.map((med) {
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceMuted,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: const BoxDecoration(
-                              color: AppColors.primaryContainer,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(Icons.medication_rounded, size: 16, color: AppColors.primaryDark),
+                child: _extraction.medications.isEmpty && !_isEditing
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Text(
+                          'No active medications listed in document.',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: AppColors.textSecondary,
+                            fontStyle: FontStyle.italic,
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                        ),
+                      )
+                    : Column(
+                        children: _extraction.medications.map((med) {
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceMuted,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
                               children: [
-                                Text(med.name, style: AppTypography.labelLarge),
-                                const SizedBox(height: 2),
-                                Text(
-                                  '${med.dose ?? ''} ${med.frequency != null ? '• ${med.frequency}' : ''}',
-                                  style: AppTypography.bodySmall,
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: const BoxDecoration(
+                                    color: AppColors.primaryContainer,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.medication_rounded, size: 16, color: AppColors.primaryDark),
                                 ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(med.name, style: AppTypography.labelLarge),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '${med.dose ?? ''} ${med.frequency != null ? '• ${med.frequency}' : ''}',
+                                        style: AppTypography.bodySmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (_isEditing)
+                                  IconButton(
+                                    icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
+                                    onPressed: () {
+                                      setState(() {
+                                        final list = List<Medication>.from(_extraction.medications)
+                                          ..remove(med);
+                                        _extraction = _extraction.copyWith(medications: list);
+                                      });
+                                    },
+                                  ),
                               ],
                             ),
-                          ),
-                          if (_isEditing)
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
-                              onPressed: () {
-                                setState(() {
-                                  final list = List<Medication>.from(_extraction.medications)
-                                    ..remove(med);
-                                  _extraction = _extraction.copyWith(medications: list);
-                                });
-                              },
-                            ),
-                        ],
+                          );
+                        }).toList(),
                       ),
-                    );
-                  }).toList(),
-                ),
               ),
               const SizedBox(height: 16),
 
@@ -369,44 +411,55 @@ class _RecordDetailsScreenState extends ConsumerState<RecordDetailsScreen> {
               AppCard(
                 title: l10n.allergies,
                 icon: Icons.warning_amber_rounded,
-                child: Column(
-                  children: _extraction.allergies.map((allergy) {
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppColors.errorContainer.withValues(alpha: 0.4),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.error.withValues(alpha: 0.2)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.crisis_alert_rounded, size: 18, color: AppColors.error),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                child: _extraction.allergies.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Text(
+                          'No adverse drug reactions or allergies reported.',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: AppColors.textSecondary,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      )
+                    : Column(
+                        children: _extraction.allergies.map((allergy) {
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppColors.errorContainer.withValues(alpha: 0.4),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppColors.error.withValues(alpha: 0.2)),
+                            ),
+                            child: Row(
                               children: [
-                                Text(
-                                  allergy.allergen,
-                                  style: AppTypography.labelLarge.copyWith(
-                                    color: const Color(0xFF7F1D1D),
-                                  ),
-                                ),
-                                Text(
-                                  'Reaction: ${allergy.reaction ?? 'Unknown'}',
-                                  style: AppTypography.bodySmall.copyWith(
-                                    color: const Color(0xFF991B1B),
+                                const Icon(Icons.crisis_alert_rounded, size: 18, color: AppColors.error),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        allergy.allergen,
+                                        style: AppTypography.labelLarge.copyWith(
+                                          color: const Color(0xFF7F1D1D),
+                                        ),
+                                      ),
+                                      Text(
+                                        'Reaction: ${allergy.reaction ?? 'Unknown'}',
+                                        style: AppTypography.bodySmall.copyWith(
+                                          color: const Color(0xFF991B1B),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ],
                             ),
-                          ),
-                        ],
+                          );
+                        }).toList(),
                       ),
-                    );
-                  }).toList(),
-                ),
               ),
               const SizedBox(height: 16),
 
@@ -414,38 +467,49 @@ class _RecordDetailsScreenState extends ConsumerState<RecordDetailsScreen> {
               AppCard(
                 title: l10n.labResults,
                 icon: Icons.biotech_outlined,
-                child: Column(
-                  children: _extraction.labResults.map((lab) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                child: _extraction.labResults.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Text(
+                          'No laboratory test panels present in document.',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: AppColors.textSecondary,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      )
+                    : Column(
+                        children: _extraction.labResults.map((lab) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: Row(
                               children: [
-                                Text(lab.testName, style: AppTypography.labelLarge.copyWith(fontSize: 13)),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Date: ${lab.date ?? 'Unknown'}',
-                                  style: AppTypography.labelSmall,
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(lab.testName, style: AppTypography.labelLarge.copyWith(fontSize: 13)),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Date: ${lab.date ?? 'Unknown'}',
+                                        style: AppTypography.labelSmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(lab.resultValue, style: AppTypography.metricValue),
+                                    const SizedBox(height: 4),
+                                    StatusChip.forLabStatus('Normal'),
+                                  ],
                                 ),
                               ],
                             ),
-                          ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(lab.resultValue, style: AppTypography.metricValue),
-                              const SizedBox(height: 4),
-                              StatusChip.forLabStatus('Normal'),
-                            ],
-                          ),
-                        ],
+                          );
+                        }).toList(),
                       ),
-                    );
-                  }).toList(),
-                ),
               ),
               const SizedBox(height: 16),
 
@@ -453,21 +517,32 @@ class _RecordDetailsScreenState extends ConsumerState<RecordDetailsScreen> {
               AppCard(
                 title: l10n.medicalHistory,
                 icon: Icons.history_edu_outlined,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: _extraction.medicalHistory.map((hist) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4.0),
-                      child: Row(
+                child: _extraction.medicalHistory.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Text(
+                          'No prior chronic history noted in document.',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: AppColors.textSecondary,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      )
+                    : Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('• ', style: TextStyle(fontWeight: FontWeight.bold)),
-                          Expanded(child: Text(hist, style: AppTypography.bodySmall)),
-                        ],
+                        children: _extraction.medicalHistory.map((hist) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4.0),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('• ', style: TextStyle(fontWeight: FontWeight.bold)),
+                                Expanded(child: Text(hist, style: AppTypography.bodySmall)),
+                              ],
+                            ),
+                          );
+                        }).toList(),
                       ),
-                    );
-                  }).toList(),
-                ),
               ),
               const SizedBox(height: 28),
 

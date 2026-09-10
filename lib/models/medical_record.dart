@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'medical_extraction.dart';
 
 enum RecordStatus { uploading, processing, processed, failed }
@@ -64,18 +65,40 @@ class MedicalRecord {
   }
 
   factory MedicalRecord.fromJson(Map<String, dynamic> json) {
+    RecordStatus parsedStatus = RecordStatus.processed;
+    final statusStr = (json['status'] as String?)?.toLowerCase();
+    if (statusStr != null) {
+      for (final s in RecordStatus.values) {
+        if (s.name.toLowerCase() == statusStr) {
+          parsedStatus = s;
+          break;
+        }
+      }
+    }
+
+    MedicalExtraction? extraction;
+    if (json['extractedInformation'] != null && json['extractedInformation'] is Map<String, dynamic>) {
+      extraction = MedicalExtraction.fromJson(json['extractedInformation'] as Map<String, dynamic>);
+    } else if (json['extraction'] != null && json['extraction'] is Map<String, dynamic>) {
+      extraction = MedicalExtraction.fromJson(json['extraction'] as Map<String, dynamic>);
+    } else if (json['extraction_json'] != null && json['extraction_json'] is String) {
+      try {
+        final decoded = jsonDecode(json['extraction_json'] as String);
+        if (decoded is Map<String, dynamic>) {
+          extraction = MedicalExtraction.fromJson(decoded);
+        }
+      } catch (_) {}
+    }
+
     return MedicalRecord(
-      id: json['id'] as String,
-      patientId: json['patientId'] as String,
-      fileName: json['fileName'] as String,
-      fileType: json['fileType'] as String,
-      fileSize: json['fileSize'] as int? ?? 0,
-      uploadDate: DateTime.parse(json['uploadDate'] as String),
-      status: RecordStatus.values.byName(json['status'] as String? ?? 'processed'),
-      extractedInformation: json['extractedInformation'] != null
-          ? MedicalExtraction.fromJson(
-              json['extractedInformation'] as Map<String, dynamic>)
-          : null,
+      id: json['id'] as String? ?? 'rec_${DateTime.now().millisecondsSinceEpoch}',
+      patientId: (json['patientId'] ?? json['patient_id']) as String? ?? 'pat_001',
+      fileName: (json['fileName'] ?? json['file_name']) as String? ?? 'Medical Document',
+      fileType: (json['fileType'] ?? json['file_type']) as String? ?? 'pdf',
+      fileSize: (json['fileSize'] ?? json['file_size']) as int? ?? 0,
+      uploadDate: DateTime.tryParse(json['uploadDate']?.toString() ?? json['created_at']?.toString() ?? '') ?? DateTime.now(),
+      status: parsedStatus,
+      extractedInformation: extraction,
       localPath: json['localPath'] as String?,
     );
   }

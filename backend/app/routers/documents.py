@@ -130,6 +130,57 @@ async def get_document_extraction(document_id: str):
         
     return MedicalExtraction.model_validate_json(doc["extraction_json"])
 
+@router.get("/patient/{patient_id}")
+async def get_patient_documents(patient_id: str):
+    """
+    Get all uploaded and processed documents for a patient.
+    """
+    docs = await DatabaseService.fetch_all(
+        "SELECT id, patient_id, file_name, file_type, file_size, status, extraction_json, created_at FROM documents WHERE patient_id = ? ORDER BY created_at DESC",
+        (patient_id,)
+    )
+    results = []
+    for doc in docs:
+        ext = None
+        if doc.get("extraction_json"):
+            try:
+                ext = json.loads(doc["extraction_json"])
+            except Exception:
+                pass
+        results.append({
+            "id": doc["id"],
+            "patientId": doc["patient_id"],
+            "patient_id": doc["patient_id"],
+            "fileName": doc["file_name"],
+            "file_name": doc["file_name"],
+            "fileType": doc["file_type"],
+            "file_type": doc["file_type"],
+            "fileSize": doc["file_size"] or 0,
+            "file_size": doc["file_size"] or 0,
+            "status": doc["status"] or "processed",
+            "uploadDate": doc["created_at"],
+            "created_at": doc["created_at"],
+            "extractedInformation": ext,
+            "extraction": ext,
+        })
+    return results
+
+@router.patch("/{document_id}/extraction", response_model=MedicalExtraction)
+async def update_document_extraction(document_id: str, updated_extraction: MedicalExtraction):
+    """
+    Update or manually correct clinical entities extracted from a document.
+    """
+    doc = await DatabaseService.fetch_one("SELECT * FROM documents WHERE id = ?", (document_id,))
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    extraction_json = updated_extraction.model_dump_json()
+    await DatabaseService.update("documents", document_id, {
+        "extraction_json": extraction_json,
+        "status": "processed"
+    })
+    return updated_extraction
+
 @router.get("/patient/{patient_id}/timeline")
 async def get_patient_timeline(patient_id: str):
     """
@@ -147,3 +198,4 @@ async def get_patient_timeline(patient_id: str):
             
     timeline = DocumentProcessor.build_timeline(extractions)
     return {"patient_id": patient_id, "timeline": timeline}
+

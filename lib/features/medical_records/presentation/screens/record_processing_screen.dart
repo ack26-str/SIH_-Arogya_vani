@@ -7,6 +7,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_card.dart';
+import '../../../../models/medical_record.dart';
 import '../../../../services/service_providers.dart';
 import '../controllers/records_controller.dart';
 
@@ -32,11 +33,21 @@ class _RecordProcessingScreenState extends ConsumerState<RecordProcessingScreen>
     final service = ref.read(documentServiceProvider);
     final recordId = record?.id ?? 'rec_001';
 
-    _subscription = service.processDocument(recordId).listen((step) {
+    _subscription = service.processDocument(recordId).listen((step) async {
       if (mounted) {
         setState(() => _currentStep = step);
         if (step == 4) {
-          Future.delayed(const Duration(milliseconds: 1200), () {
+          try {
+            final extraction = await service.getExtractedInformation(recordId);
+            if (mounted && record != null) {
+              ref.read(activeProcessingRecordProvider.notifier).state = record.copyWith(
+                extractedInformation: extraction,
+                status: RecordStatus.processed,
+              );
+            }
+          } catch (_) {}
+
+          Future.delayed(const Duration(milliseconds: 1000), () {
             if (mounted) {
               ref.read(recordsListProvider.notifier).loadRecords();
               context.go('/record-details');
@@ -181,19 +192,37 @@ class _RecordProcessingScreenState extends ConsumerState<RecordProcessingScreen>
 
               const Spacer(),
 
-              // Prototype notice
+              // Production engine status
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceMuted,
-                  borderRadius: BorderRadius.circular(10),
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
                 ),
-                child: Text(
-                  'Prototype Simulation: Clinical entity extraction pipeline running in demonstration mode.',
-                  textAlign: TextAlign.center,
-                  style: AppTypography.labelSmall.copyWith(
-                    color: AppColors.textSecondary,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: AppColors.primary,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        'AI Clinical Vision Engine: Powered by Gemini Multimodal OCR',
+                        textAlign: TextAlign.center,
+                        style: AppTypography.labelSmall.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 16),

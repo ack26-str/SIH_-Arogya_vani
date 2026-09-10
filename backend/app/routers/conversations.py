@@ -12,7 +12,9 @@ from app.models.schemas import (
     StartConversationResponse,
     SendMessageRequest,
     SendMessageResponse,
-    DepartmentConfig
+    DepartmentConfig,
+    Medication,
+    Allergy,
 )
 from app.services.intake_state_machine import IntakeState, IntakeStateMachine
 from app.services.llm_service import extract_clinical_data, phrase_clinical_question, process_unified_intake_turn
@@ -46,13 +48,39 @@ async def start_conversation(request: StartConversationRequest):
     # We get the first topic to start
     topic = IntakeStateMachine.get_next_topic(initial_state)
     
+    # Pre-seed clinical state from any processed medical documents
+    docs = await DatabaseService.fetch_all(
+        "SELECT extraction_json FROM documents WHERE patient_id = ? AND status = 'processed'",
+        (request.patient_id,)
+    )
+    for doc in docs:
+        if doc.get("extraction_json"):
+            try:
+                ext_dict = json.loads(doc["extraction_json"])
+                for med in ext_dict.get("medications", []):
+                    initial_state.drug_history.append(Medication(
+                        name=med.get("name", ""),
+                        dose=med.get("dose"),
+                        frequency=med.get("frequency")
+                    ))
+                for al in ext_dict.get("allergies", []):
+                    initial_state.allergy_history.append(Allergy(
+                        allergen=al.get("allergen", ""),
+                        reaction=al.get("reaction")
+                    ))
+                for hist in ext_dict.get("medical_history", []):
+                    if hist not in initial_state.past_medical_history:
+                        initial_state.past_medical_history.append(hist)
+            except Exception:
+                pass
+    
     LOCALIZED_GREETINGS = {
         "en": "Hello! I am AarogyaVani. What brings you to the clinic today?",
         "hi": "नमस्ते! मैं आरोग्यवाणी हूँ। आज आप अस्पताल किस समस्या के लिए आए हैं?",
         "kn": "ನಮಸ್ಕಾರ! ನಾನು ಆರೋಗ್ಯವಾಣಿ. ಇಂದು ನೀವು ಕ್ಲಿನಿಕ್‌ಗೆ ಯಾವ ತೊಂದರೆಗಾಗಿ ಬಂದಿದ್ದೀರಿ?",
         "ta": "வணக்கம்! நான் ஆரோக்கியவாணி. இன்று நீங்கள் மருத்துவமனைக்கு என்ன காரணத்திற்காக வந்துள்ளீர்கள்?",
         "te": "నమస్కారం! నేను ఆరోగ్యవాణిని. ఈ రోజు మీరు క్లినిక్‌కి ఏ సమస్య కోసం వచ్చారు?",
-        "ml": "നമസ്കാരം! ഞാൻ ആരോഗ്യവാണി. ഇന്ന് നിങ്ങൾ ക്ലിനിക്കിൽ എത്തിയത് എന്ത് ബുദ്ധിಮುട്ട് കാരണമാണ്?",
+        "ml": "നമസ്കാരം! ഞാൻ ആരോഗ്യവാണി. ഇന്ന് നിങ്ങൾ ക്ലിനിക്കിൽ എത്തിയത് എന്ത് ബുദ്ധിമുട്ട് കാരണമാണ്?",
     }
     greeting = LOCALIZED_GREETINGS.get(request.language, "Hello! I am AarogyaVani. What brings you to the clinic today?")
     
